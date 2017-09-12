@@ -6,18 +6,26 @@ android {
     defaultConfig {
         applicationId "tech.gujin.tinkersample"
         minSdkVersion 21
-        targetSdkVersion 25
+        targetSdkVersion 22
         versionCode 1
         versionName "1.0"
     }
+    signingConfigs {
+        release {
+            storeFile file("./keystore/release.keystore")
+            storePassword "testres"
+            keyAlias "testres"
+            keyPassword "testres"
+        }
+    }
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true
+            signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
         debug {
             minifyEnabled false
-
         }
     }
 }
@@ -28,4 +36,110 @@ dependencies {
     compile('com.tencent.tinker:tinker-android-lib:1.8.1')
 }
 
-apply plugin: 'com.tencent.tinker.patch'
+def bakPath = file("./tinker-old/")
+
+ext {
+    tinkerId = "tinker_id_" + android.defaultConfig.versionName + "_" + android.defaultConfig.versionCode
+    tinkerEnabled = true
+    tinkerOldApkPath = "${bakPath}/app-release-1.0-1.apk"
+    tinkerApplyMappingPath = "${bakPath}/app-release-1.0-1-mapping.txt"
+    tinkerApplyResourcePath = "${bakPath}/app-release-1.0-1-R.txt"
+}
+
+def getOldApkPath() {
+    return ext.tinkerOldApkPath
+}
+
+def getApplyMappingPath() {
+    return ext.tinkerApplyMappingPath
+}
+
+def getApplyResourceMappingPath() {
+    return ext.tinkerApplyResourcePath
+}
+
+def getTinkerIdValue() {
+    return ext.tinkerId
+}
+
+def buildWithTinker() {
+    return ext.tinkerEnabled
+}
+
+def getTinkerBuildFlavorDirectory() {
+    return ext.tinkerBuildFlavorDirectory
+}
+
+if (buildWithTinker()) {
+    apply plugin: 'com.tencent.tinker.patch'
+
+    tinkerPatch {
+        oldApk = getOldApkPath()
+        ignoreWarning = false
+        useSign = true
+        buildConfig {
+            applyMapping = getApplyMappingPath()
+            applyResourceMapping = getApplyResourceMappingPath()
+            tinkerId = getTinkerIdValue()
+        }
+
+        dex {
+            dexMode = "jar"
+            pattern = ["classes*.dex", "assets/secondary-dex-?.jar"]
+        }
+
+        lib {
+            pattern = ["lib/*/*.so"]
+        }
+
+        res {
+            pattern = ["res/*", "assets/*", "resources.arsc", "AndroidManifest.xml"]
+            ignoreChange = ["assets/sample_meta.txt"]
+            largeModSize = 100
+        }
+
+        packageConfig {
+            configField("patchMessage", "tinker is sample to use")
+            configField("platform", "all")
+            configField("patchVersion", "1.0")
+        }
+        sevenZip {
+            zipArtifact = "com.tencent.mm:SevenZip:1.1.10"
+        }
+    }
+
+    android.applicationVariants.all { variant ->
+        def taskName = variant.name
+
+        tasks.all {
+            if ("assemble${taskName.capitalize()}".equalsIgnoreCase(it.name)) {
+
+                it.doLast {
+                    copy {
+                        def fileNamePrefix = "${project.name}-${variant.baseName}"
+                        def newFileNamePrefix = "${fileNamePrefix}-" + android.defaultConfig.versionName + "-" + android.defaultConfig.versionCode
+
+                        def destPath = bakPath
+                        from variant.outputs.outputFile
+                        into destPath
+                        rename { String fileName ->
+                            fileName.replace("${fileNamePrefix}.apk", "${newFileNamePrefix}.apk")
+                        }
+
+                        from "${buildDir}/outputs/mapping/${variant.dirName}/mapping.txt"
+                        into destPath
+                        rename { String fileName ->
+                            fileName.replace("mapping.txt", "${newFileNamePrefix}-mapping.txt")
+                        }
+
+                        from "${buildDir}/intermediates/symbols/${variant.dirName}/R.txt"
+                        into destPath
+                        rename { String fileName ->
+                            fileName.replace("R.txt", "${newFileNamePrefix}-R.txt")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
